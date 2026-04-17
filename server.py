@@ -1,51 +1,73 @@
 import os
-import tempfile
+import eccodes
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import cfgrib
 
 app = Flask(__name__)
-CORS(app)  # Autorise le frontend Vercel à contacter cette API externe
+CORS(app) 
 
 @app.route('/decode', methods=['POST'])
 def decode_grib():
     if 'file' not in request.files:
-        return jsonify({"error": "No file uploaded under key 'file'"}), 400
+        return jsonify({"error": "Aucun fichier reçu"}), 400
         
     file = request.files['file']
-    if file.filename == '':
-        return jsonify({"error": "Uploaded file is empty"}), 400
-        
-    # Sauvegarde du fichier uploadé de façon temporaire
-    temp_path = ""
+    temp_path = "/tmp/temp_data.grib"
+    file.save(temp_path)
+    
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".grib", dir="/tmp") as tf:
-            file.save(tf.name)
-            temp_path = tf.name
-            
-        # Ouverture avec cfgrib
-        datasets = cfgrib.open_datasets(temp_path)
+        f = open(temp_path, 'rb')
+        data_array = None
         
-        # Extraction des valeurs pwat
-        pwat_data = None
-        for ds in datasets:
-            # Chercher dans ds.data_vars
-            pwat_keys = [v for v in ds.data_vars if 'pwat' in v.lower()]
-            if pwat_keys:
-                # Utiliser la première variable trouvée qui matche 'pwat'
-                pwat_data = ds[pwat_keys[0]].values.flatten().tolist()
+        # 1. On parcourt les messages GRIB pour chercher la vapeur d'eau par son nom
+        while True:
+            gid = eccodes.codes_grib_new_from_file(f)
+            if gid is None:
+                break  # Fin du fichier
+            
+            try:
+                short_name = eccodes.codes_get_string(gid, 'shortName')
+            except Exception:
+                short_name = ""
+                
+            # 'pwat', 'tcwv' et 'prw' sont les noms GRIB standards pour Precipitable Water
+            if short_name.lower() in ['pwat', 'tcwv', 'prw']:
+                data_array = eccodes.codes_get_values(gid).tolist()
+                eccodes.codes_release(gid)
                 break
                 
-        if pwat_data is None:
-            return jsonify({"error": "Variable 'pwat' not found in GRIB file"}), 400
+            eccodes.codes_release(gid)
             
-        return jsonify({"data": pwat_data}), 200
+        f.close()
+        
+        # 2. PLAN B : Si le nom n'est pas trouvé, on extrait le 38ème record
+        if data_array is None:
+            f = open(temp_path, 'rb')
+            target_record = 38
+            current = 1
+            while True:
+                gid = eccodes.codes_grib_new_from_file(f)
+                if gid is None:
+                    break
+                    
+                if current == target_record:
+                    data_array = eccodes.codes_get_values(gid).tolist()
+                    eccodes.codes_release(gid)
+                    break
+                    
+                eccodes.codes_release(gid)
+                current += 1
+            f.close()
+
+        if data_array is None:
+            raise ValueError("Impossible de trouver les données de vapeur d'eau dans le fichier GRIB.")
+
+        return jsonify({"data": data_array})
         
     except Exception as e:
-        return jsonify({"error": f"Failed to extract with cfgrib: {str(e)}"}), 500
+        return jsonify({"error": f"Erreur interne ecCodes : {str(e)}"}), 500
         
     finally:
-        # Nettoyage
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
