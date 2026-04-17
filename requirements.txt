@@ -1,0 +1,5 @@
+numpy
+cfgrib
+eccodes
+Flask
+Flask-Cors
