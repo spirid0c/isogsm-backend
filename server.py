@@ -23,7 +23,7 @@ def decode_grib():
         # --- CIBLE EXACTE ---
         # D'après les logs, le Record 49 est le PWAT global.
         # Les traceurs JP et BZ sont dans les "unknown" suivants (51 ou 52).
-        TARGET_RECORD = 51 
+        TARGET_RECORD = 52 
         
         f = open(temp_path, 'rb')
         current = 1
