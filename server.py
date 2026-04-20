@@ -1,3 +1,13 @@
+import os
+import eccodes
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+
+# --- INITIALISATION DE L'APPLICATION ---
+app = Flask(__name__)
+CORS(app) 
+
+# --- ROUTE DE DÉCODAGE ---
 @app.route('/decode', methods=['POST'])
 def decode_grib():
     if 'file' not in request.files:
@@ -11,7 +21,8 @@ def decode_grib():
         data_array = None
         
         # --- CIBLE EXACTE ---
-        # On ignore le PWAT global (49) et on vise les traceurs inconnus
+        # D'après les logs, le Record 49 est le PWAT global.
+        # Les traceurs JP et BZ sont dans les "unknown" suivants (51 ou 52).
         TARGET_RECORD = 51 
         
         f = open(temp_path, 'rb')
@@ -41,3 +52,8 @@ def decode_grib():
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
+
+# --- LANCEMENT DU SERVEUR ---
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
