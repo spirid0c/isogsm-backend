@@ -3,11 +3,9 @@ import eccodes
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-# --- INITIALISATION DE L'APPLICATION ---
 app = Flask(__name__)
 CORS(app) 
 
-# --- ROUTE DE DÉCODAGE ---
 @app.route('/decode', methods=['POST'])
 def decode_grib():
     if 'file' not in request.files:
@@ -20,29 +18,35 @@ def decode_grib():
     try:
         data_array = None
         
-        # --- CIBLE EXACTE ---
-        # D'après les logs, le Record 49 est le PWAT global.
-        # Les traceurs JP et BZ sont dans les "unknown" suivants (51 ou 52).
-        TARGET_RECORD = 52 
+        # --- LA CIBLE INFAILLIBLE ---
+        # 150 = Traceur Japon (PWAT1)
+        # 151 = Traceur Brésil (PWAT2)
+        # 54  = Vapeur Globale (PWAT)
+        TARGET_PARAM_ID = 150 
         
         f = open(temp_path, 'rb')
-        current = 1
         while True:
             gid = eccodes.codes_grib_new_from_file(f)
             if gid is None: 
                 break
+            
+            try:
+                # On lit l'identifiant numérique officiel du GRIB1
+                param_id = eccodes.codes_get_long(gid, 'indicatorOfParameter')
                 
-            if current == TARGET_RECORD:
-                data_array = eccodes.codes_get_values(gid).tolist()
-                eccodes.codes_release(gid)
-                break
+                if param_id == TARGET_PARAM_ID:
+                    data_array = eccodes.codes_get_values(gid).tolist()
+                    eccodes.codes_release(gid)
+                    break
+            except Exception:
+                pass
                 
             eccodes.codes_release(gid)
-            current += 1
+            
         f.close()
 
         if data_array is None:
-            raise ValueError(f"Record {TARGET_RECORD} introuvable.")
+            raise ValueError(f"La variable ID {TARGET_PARAM_ID} est introuvable dans ce fichier.")
 
         return jsonify({"data": data_array})
         
@@ -53,7 +57,6 @@ def decode_grib():
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
-# --- LANCEMENT DU SERVEUR ---
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
