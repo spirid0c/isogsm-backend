@@ -12,68 +12,45 @@ def decode_grib():
         return jsonify({"error": "Aucun fichier reçu"}), 400
         
     file = request.files['file']
-    action = request.form.get('action', 'decode') # 'scan' ou 'decode'
     temp_path = "/tmp/temp_data.grib"
     file.save(temp_path)
     
     try:
-        f = open(temp_path, 'rb')
+        data_array = None
         
-        # --- ACTION : SCAN ---
-        # On lit juste les métadonnées pour créer le menu
-        if action == 'scan':
-            variables = []
-            while True:
-                gid = eccodes.codes_grib_new_from_file(f)
-                if gid is None: break
-                
-                try:
-                    param_id = eccodes.codes_get_long(gid, 'indicatorOfParameter')
-                    short_name = eccodes.codes_get_string(gid, 'shortName')
-                    name = eccodes.codes_get_string(gid, 'name')
-                    level = eccodes.codes_get_long(gid, 'level')
-                    
-                    # On évite les doublons (si le fichier a plusieurs time steps)
-                    var_info = {"id": param_id, "shortName": short_name, "name": name, "level": level}
-                    if var_info not in variables:
-                        variables.append(var_info)
-                        
-                except Exception:
-                    pass
-                eccodes.codes_release(gid)
-                
-            f.close()
-            return jsonify({"variables": variables})
+        # --- LA CIBLE DYNAMIQUE ---
+        # Le serveur écoute ce que le site JS demande (150 ou 151).
+        # Si rien n'est précisé, il prend 150 (Japon) par défaut.
+        TARGET_PARAM_ID = int(request.form.get('param_id', 150))
+        
+        f = open(temp_path, 'rb')
+        while True:
+            gid = eccodes.codes_grib_new_from_file(f)
+            if gid is None: 
+                break
             
-        # --- ACTION : DECODE ---
-        # On extrait les données 3D pour un paramètre précis
-        elif action == 'decode':
-            data_array = None
-            TARGET_PARAM_ID = int(request.form.get('param_id', 150))
+            try:
+                # On lit l'identifiant numérique officiel du GRIB1
+                param_id = eccodes.codes_get_long(gid, 'indicatorOfParameter')
+                
+                if param_id == TARGET_PARAM_ID:
+                    data_array = eccodes.codes_get_values(gid).tolist()
+                    eccodes.codes_release(gid)
+                    break
+            except Exception:
+                pass
+                
+            eccodes.codes_release(gid)
             
-            while True:
-                gid = eccodes.codes_grib_new_from_file(f)
-                if gid is None: break
-                
-                try:
-                    param_id = eccodes.codes_get_long(gid, 'indicatorOfParameter')
-                    if param_id == TARGET_PARAM_ID:
-                        data_array = eccodes.codes_get_values(gid).tolist()
-                        eccodes.codes_release(gid)
-                        break
-                except Exception:
-                    pass
-                eccodes.codes_release(gid)
-                
-            f.close()
+        f.close()
 
-            if data_array is None:
-                raise ValueError(f"ID {TARGET_PARAM_ID} introuvable.")
-                
-            return jsonify({"data": data_array})
+        if data_array is None:
+            raise ValueError(f"La variable ID {TARGET_PARAM_ID} est introuvable dans ce fichier.")
 
+        return jsonify({"data": data_array})
+        
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Erreur interne : {str(e)}"}), 500
         
     finally:
         if os.path.exists(temp_path):
@@ -82,3 +59,5 @@ def decode_grib():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
+
+
