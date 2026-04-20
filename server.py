@@ -18,54 +18,67 @@ def decode_grib():
     try:
         f = open(temp_path, 'rb')
         data_array = None
+        pwat_found = False
         
-        # 1. On parcourt les messages GRIB pour chercher la vapeur d'eau par son nom
+        print(f"\n--- ANALYSE DU FICHIER : {file.filename} ---")
+        current = 1
+        
+        # 1. On scanne TOUT le fichier pour voir ce qu'il contient
         while True:
             gid = eccodes.codes_grib_new_from_file(f)
             if gid is None:
                 break  # Fin du fichier
             
             try:
+                # On récupère les infos de la variable
                 short_name = eccodes.codes_get_string(gid, 'shortName')
-            except Exception:
-                short_name = ""
+                name = eccodes.codes_get_string(gid, 'name')
+                level = eccodes.codes_get_long(gid, 'level')
                 
-            # 'pwat', 'tcwv' et 'prw' sont les noms GRIB standards pour Precipitable Water
-            if short_name.lower() in ['pwat', 'tcwv', 'prw']:
-                data_array = eccodes.codes_get_values(gid).tolist()
-                eccodes.codes_release(gid)
-                break
+                # On affiche la variable dans les logs de Render !
+                print(f"Record {current} | shortName: '{short_name}' | name: '{name}' | level: {level}")
+                
+                # Si c'est un nom standard, on le garde
+                if short_name.lower() in ['pwat', 'tcwv', 'prw'] and not pwat_found:
+                    print(f"✅ PWAT STANDARD TROUVÉ AU RECORD {current} ! Extraction...")
+                    data_array = eccodes.codes_get_values(gid).tolist()
+                    pwat_found = True
+                    
+            except Exception as e:
+                print(f"Record {current} | Méta-données illisibles.")
                 
             eccodes.codes_release(gid)
+            current += 1
             
         f.close()
+        print("--- FIN DE L'ANALYSE ---\n")
         
-        # 2. PLAN B : Si le nom n'est pas trouvé, on extrait le 38ème record
-        if data_array is None:
+        # 2. PLAN B : Si on n'a pas trouvé de nom standard
+        if not pwat_found:
+            TARGET_RECORD = 38 # <-- C'est lui qu'il faudra changer après avoir lu les logs !
+            print(f"⚠️ Traceur introuvable par nom. Application du Plan B : Extraction du Record {TARGET_RECORD}...")
+            
             f = open(temp_path, 'rb')
-            target_record = 38
             current = 1
             while True:
                 gid = eccodes.codes_grib_new_from_file(f)
-                if gid is None:
-                    break
-                    
-                if current == target_record:
+                if gid is None: break
+                if current == TARGET_RECORD:
                     data_array = eccodes.codes_get_values(gid).tolist()
                     eccodes.codes_release(gid)
                     break
-                    
                 eccodes.codes_release(gid)
                 current += 1
             f.close()
 
         if data_array is None:
-            raise ValueError("Impossible de trouver les données de vapeur d'eau dans le fichier GRIB.")
+            raise ValueError("Impossible d'extraire les données.")
 
         return jsonify({"data": data_array})
         
     except Exception as e:
-        return jsonify({"error": f"Erreur interne ecCodes : {str(e)}"}), 500
+        print(f"ERREUR CRITIQUE : {str(e)}")
+        return jsonify({"error": f"Erreur interne : {str(e)}"}), 500
         
     finally:
         if os.path.exists(temp_path):
