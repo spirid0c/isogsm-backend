@@ -18,11 +18,10 @@ def decode_grib():
     try:
         data_array = None
         
-        # --- LA CIBLE INFAILLIBLE ---
-        # 150 = Traceur Japon (PWAT1)
-        # 151 = Traceur Brésil (PWAT2)
-        # 54  = Vapeur Globale (PWAT)
-        TARGET_PARAM_ID = 150 
+        # --- LA CIBLE DYNAMIQUE ---
+        # Le serveur écoute ce que le site JS demande (150 ou 151).
+        # Si rien n'est précisé, il prend 150 (Japon) par défaut.
+        TARGET_PARAM_ID = int(request.form.get('param_id', 150))
         
         f = open(temp_path, 'rb')
         while True:
